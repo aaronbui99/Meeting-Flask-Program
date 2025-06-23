@@ -69,46 +69,47 @@ def create_app(test_config=None):
         
         if audio_file.filename == '':
             return jsonify({'error': 'No audio file selected'}), 400
-            
+
+        import vertexai
+        from vertexai.preview import model_garden
+
+        vertexai.init(project="meeting-record-whisper-program", location="asia-southeast1")  # e.g., "us-central1"
+
         try:
-            # Save the uploaded file temporarily
+
             with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_audio:
                 audio_file.save(temp_audio.name)
                 temp_audio_path = temp_audio.name
-            
-            # Import here to ensure Vertex AI is initialized first
-            import vertexai
-            from vertexai import model_garden
-            
-            # Get the model from main.py or initialize it here
-            try:
-                whisper_model = model_garden.OpenModel("openai/whisper-large@whisper-large-v3-turbo")
-                endpoint = whisper_model.deploy()
-                
-                # Transcribe the audio
-                with open(temp_audio_path, 'rb') as f:
-                    audio_content = f.read()
-                
-                response = endpoint.predict(
-                    audio_content=audio_content,
-                    audio_format="wav"  # Adjust based on your file format
-                )
-                
-                # Clean up the temporary file
-                os.unlink(temp_audio_path)
-                
-                return jsonify({
-                    'success': True,
-                    'transcription': response.text
-                })
-                
-            except Exception as e:
-                # Clean up the temporary file in case of error
-                os.unlink(temp_audio_path)
-                return jsonify({
-                    'success': False,
-                    'error': str(e)
-                }), 500
+            # Load Whisper model from Model Garden
+            whisper_model = model_garden.OpenModel("openai/whisper-large@whisper-large-v3")
+
+            # Deploy the model (or skip if already deployed)
+            endpoint = whisper_model.deploy()  # You can cache this in real app
+
+            # Read audio file
+            with open(temp_audio_path, "rb") as f:
+                audio_content = f.read()
+
+            # Make prediction
+            response = endpoint.predict(
+                audio=audio_content,
+                mime_type="audio/wav"  # or "audio/mpeg", "audio/flac", etc.
+            )
+
+            # Clean up
+            os.unlink(temp_audio_path)
+
+            return jsonify({
+                "success": True,
+                "transcription": response.text
+            })
+
+        except Exception as e:
+            os.unlink(temp_audio_path)
+            return jsonify({
+                "success": False,
+                "error": str(e)
+            }), 500
                 
         except Exception as e:
             return jsonify({
