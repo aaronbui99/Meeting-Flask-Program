@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Whisper Audio Transcription</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .container {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #dff0d8;
+            color: #3c763d;
+        }
+        .error {
+            background-color: #f2dede;
+            color: #a94442;
+        }
+        .loading {
+            background-color: #d9edf7;
+            color: #31708f;
+        }
+        #transcription {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            min-height: 100px;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        #recordingStatus {
+            margin-left: 10px;
+            font-style: italic;
+        }
+        .home-link {
+            display: block;
+            margin-top: 20px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Whisper Audio Transcription</h1>
+    
+    <div class="container">
+        <h2>Record Audio</h2>
+        <div class="controls">
+            <button id="recordButton">Start Recording</button>
+            <button id="stopButton" disabled>Stop Recording</button>
+            <span id="recordingStatus"></span>
+        </div>
+        
+        <h2>Or Upload Audio File</h2>
+        <div class="form-group">
+            <label for="audioFile">Select audio file (WAV format recommended):</label>
+            <input type="file" id="audioFile" accept="audio/*">
+        </div>
+        
+        <button id="transcribeButton">Transcribe Audio</button>
+        
+        <div id="status" class="status" style="display: none;"></div>
+        
+        <h2>Transcription Result:</h2>
+        <div id="transcription">No transcription yet. Record or upload an audio file and click "Transcribe Audio".</div>
+    </div>
+    
+    <a href="/" class="home-link">Return to Home</a>
+    
+    <script>
+        // Variables for recording
+        let mediaRecorder;
+        let audioChunks = [];
+        let recordedBlob;
+        
+        // DOM elements
+        const recordButton = document.getElementById('recordButton');
+        const stopButton = document.getElementById('stopButton');
+        const recordingStatus = document.getElementById('recordingStatus');
+        const audioFileInput = document.getElementById('audioFile');
+        const transcribeButton = document.getElementById('transcribeButton');
+        const statusDiv = document.getElementById('status');
+        const transcriptionDiv = document.getElementById('transcription');
+        
+        // Set up recording functionality
+        recordButton.addEventListener('click', async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                
+                mediaRecorder.addEventListener('dataavailable', event => {
+                    audioChunks.push(event.data);
+                });
+                
+                mediaRecorder.addEventListener('stop', () => {
+                    recordedBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    recordingStatus.textContent = 'Recording saved. Click "Transcribe Audio" to process.';
+                    
+                    // Stop all tracks to release the microphone
+                    stream.getTracks().forEach(track => track.stop());
+                });
+                
+                // Start recording
+                mediaRecorder.start();
+                recordButton.disabled = true;
+                stopButton.disabled = false;
+                recordingStatus.textContent = 'Recording...';
+                
+            } catch (error) {
+                console.error('Error accessing microphone:', error);
+                recordingStatus.textContent = 'Error: Could not access microphone.';
+                showStatus('error', 'Could not access microphone. Please check permissions.');
+            }
+        });
+        
+        stopButton.addEventListener('click', () => {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                recordButton.disabled = false;
+                stopButton.disabled = true;
+            }
+        });
+        
+        // Handle transcription
+        transcribeButton.addEventListener('click', async () => {
+            let audioToTranscribe;
+            
+            // Check if we have a recorded blob or a file upload
+            if (recordedBlob) {
+                audioToTranscribe = recordedBlob;
+            } else if (audioFileInput.files.length > 0) {
+                audioToTranscribe = audioFileInput.files[0];
+            } else {
+                showStatus('error', 'No audio available. Please record or upload an audio file first.');
+                return;
+            }
+            
+            // Create FormData and append the audio
+            const formData = new FormData();
+            formData.append('audio', audioToTranscribe);
+            
+            // Show loading status
+            showStatus('loading', 'Transcribing audio... This may take a moment.');
+            transcribeButton.disabled = true;
+            
+            try {
+                const response = await fetch('/transcribe', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showStatus('success', 'Transcription completed successfully!');
+                    transcriptionDiv.textContent = result.transcription;
+                } else {
+                    showStatus('error', `Error: ${result.error}`);
+                    transcriptionDiv.textContent = 'Transcription failed. Please try again.';
+                }
+            } catch (error) {
+                showStatus('error', `Error: ${error.message}`);
+                transcriptionDiv.textContent = 'Transcription failed. Please try again.';
+            } finally {
+                transcribeButton.disabled = false;
+            }
+        });
+        
+        // Helper function to show status messages
+        function showStatus(type, message) {
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+        }
+        
+        // Clear recorded audio when a file is selected
+        audioFileInput.addEventListener('change', () => {
+            recordedBlob = null;
+            recordingStatus.textContent = '';
+        });
+    </script>
+</body>
+</html>
