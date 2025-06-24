@@ -105,12 +105,28 @@
             <input type="file" id="audioFile" accept="audio/*">
         </div>
         
+        <div class="form-group">
+            <label>Output Format:</label>
+            <div>
+                <input type="radio" id="formatText" name="format" value="text" checked>
+                <label for="formatText">Text (display on screen)</label>
+            </div>
+            <div>
+                <input type="radio" id="formatPdf" name="format" value="pdf">
+                <label for="formatPdf">PDF (download file)</label>
+            </div>
+        </div>
+        
         <button id="transcribeButton">Transcribe Audio</button>
         
         <div id="status" class="status" style="display: none;"></div>
         
         <h2>Transcription Result:</h2>
         <div id="transcription">No transcription yet. Record or upload an audio file and click "Transcribe Audio".</div>
+        
+        <div id="downloadContainer" style="margin-top: 20px; display: none;">
+            <a id="downloadLink" class="btn" href="#" download>Download PDF</a>
+        </div>
     </div>
     
     <a href="/" class="home-link">Return to Home</a>
@@ -185,33 +201,153 @@
                 return;
             }
             
+            // Get selected format
+            const formatPdf = document.getElementById('formatPdf').checked;
+            const downloadContainer = document.getElementById('downloadContainer');
+            const downloadLink = document.getElementById('downloadLink');
+            
             // Create FormData and append the audio
             const formData = new FormData();
             formData.append('audio', audioToTranscribe);
+            formData.append('format', formatPdf ? 'pdf' : 'text');
             
             // Show loading status
             showStatus('loading', 'Transcribing audio... This may take a moment.');
             transcribeButton.disabled = true;
+            downloadContainer.style.display = 'none';
             
             try {
-                const response = await fetch('/transcribe', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const result = await response.json();
-                
-                if (result.success) {
-                    showStatus('success', 'Transcription completed successfully!');
-                    transcriptionDiv.textContent = result.transcription;
+                if (formatPdf) {
+                    // For PDF format, we need to handle the response differently
+                    // Create a hidden iframe to handle the file download
+                    const iframe = document.createElement('iframe');
+                    iframe.style.display = 'none';
+                    document.body.appendChild(iframe);
+                    
+                    // Create a form to submit
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = '/transcribe';
+                    form.enctype = 'multipart/form-data';
+                    form.target = iframe.name;
+                    
+                    // Add the audio file
+                    const audioInput = document.createElement('input');
+                    audioInput.type = 'file';
+                    audioInput.name = 'audio';
+                    audioInput.style.display = 'none';
+                    
+                    // Create a new file list with our audio
+                    const dataTransfer = new DataTransfer();
+                    dataTransfer.items.add(audioToTranscribe);
+                    audioInput.files = dataTransfer.files;
+                    
+                    // Add format input
+                    const formatInput = document.createElement('input');
+                    formatInput.type = 'hidden';
+                    formatInput.name = 'format';
+                    formatInput.value = 'pdf';
+                    
+                    // Add inputs to form
+                    form.appendChild(audioInput);
+                    form.appendChild(formatInput);
+                    
+                    // Add form to document and submit
+                    document.body.appendChild(form);
+                    
+                    // Set up iframe load event
+                    iframe.name = 'pdf-download-frame';
+                    iframe.onload = function() {
+                        showStatus('success', 'Transcription completed successfully! Your PDF is downloading.');
+                        transcribeButton.disabled = false;
+                        
+                        // Clean up
+                        setTimeout(() => {
+                            document.body.removeChild(form);
+                            document.body.removeChild(iframe);
+                        }, 1000);
+                    };
+                    
+                    // Submit the form
+                    form.submit();
+                    
+                    // Show a message in the transcription area
+                    transcriptionDiv.textContent = 'Transcription has been converted to PDF and is downloading...';
                 } else {
-                    showStatus('error', `Error: ${result.error}`);
-                    transcriptionDiv.textContent = 'Transcription failed. Please try again.';
+                    // For text format, use fetch as before
+                    const response = await fetch('/transcribe', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        showStatus('success', 'Transcription completed successfully!');
+                        transcriptionDiv.textContent = result.transcription;
+                        
+                        // Store the transcription for potential PDF download later
+                        window.lastTranscription = result.transcription;
+                        
+                        // Show download link option
+                        downloadContainer.style.display = 'block';
+                        downloadLink.onclick = async function(e) {
+                            e.preventDefault();
+                            
+                            // Create a new FormData with the transcription text
+                            const pdfFormData = new FormData();
+                            pdfFormData.append('audio', audioToTranscribe);
+                            pdfFormData.append('format', 'pdf');
+                            
+                            // Submit a form to download the PDF
+                            const form = document.createElement('form');
+                            form.method = 'POST';
+                            form.action = '/transcribe';
+                            form.enctype = 'multipart/form-data';
+                            form.target = '_blank';
+                            
+                            // Add the audio file
+                            const audioInput = document.createElement('input');
+                            audioInput.type = 'file';
+                            audioInput.name = 'audio';
+                            audioInput.style.display = 'none';
+                            
+                            // Create a new file list with our audio
+                            const dataTransfer = new DataTransfer();
+                            dataTransfer.items.add(audioToTranscribe);
+                            audioInput.files = dataTransfer.files;
+                            
+                            // Add format input
+                            const formatInput = document.createElement('input');
+                            formatInput.type = 'hidden';
+                            formatInput.name = 'format';
+                            formatInput.value = 'pdf';
+                            
+                            // Add inputs to form
+                            form.appendChild(audioInput);
+                            form.appendChild(formatInput);
+                            
+                            // Add form to document and submit
+                            document.body.appendChild(form);
+                            form.submit();
+                            
+                            // Clean up
+                            setTimeout(() => {
+                                document.body.removeChild(form);
+                            }, 1000);
+                        };
+                    } else {
+                        showStatus('error', `Error: ${result.error}`);
+                        transcriptionDiv.textContent = 'Transcription failed. Please try again.';
+                        downloadContainer.style.display = 'none';
+                    }
+                    
+                    transcribeButton.disabled = false;
                 }
             } catch (error) {
                 showStatus('error', `Error: ${error.message}`);
                 transcriptionDiv.textContent = 'Transcription failed. Please try again.';
-            } finally {
+                downloadContainer.style.display = 'none';
                 transcribeButton.disabled = false;
             }
         });

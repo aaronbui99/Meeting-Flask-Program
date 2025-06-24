@@ -1,6 +1,11 @@
 import os
 import tempfile
-from flask import Flask, render_template, request, jsonify
+import datetime
+from flask import Flask, render_template, request, jsonify, send_file
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 
 
 def create_app(test_config=None):
@@ -59,6 +64,54 @@ def create_app(test_config=None):
     def test_whisper_page():
         return render_template('test_whisper.html')
     
+    # Function to generate PDF from transcription
+    def generate_pdf(transcription, filename=None):
+        if filename is None:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"transcription_{timestamp}.pdf"
+        
+        pdf_path = os.path.join(tempfile.gettempdir(), filename)
+        
+        # Create PDF document
+        doc = SimpleDocTemplate(
+            pdf_path,
+            pagesize=letter,
+            title="Meeting Transcription"
+        )
+        
+        # Define styles
+        styles = getSampleStyleSheet()
+        title_style = styles['Title']
+        normal_style = styles['Normal']
+        
+        # Create content
+        content = []
+        
+        # Add title
+        content.append(Paragraph("Meeting Transcription", title_style))
+        content.append(Spacer(1, 12))
+        
+        # Add timestamp
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        content.append(Paragraph(f"Generated on: {timestamp}", normal_style))
+        content.append(Spacer(1, 12))
+        
+        # Add transcription text
+        content.append(Paragraph("Transcription:", styles['Heading2']))
+        content.append(Spacer(1, 6))
+        
+        # Split transcription into paragraphs and add them
+        paragraphs = transcription.split('\n\n')
+        for para in paragraphs:
+            if para.strip():
+                content.append(Paragraph(para, normal_style))
+                content.append(Spacer(1, 6))
+        
+        # Build the PDF
+        doc.build(content)
+        
+        return pdf_path
+    
     # API endpoint for audio transcription
     @app.route('/transcribe', methods=['POST'])
     def transcribe_audio():
@@ -69,22 +122,29 @@ def create_app(test_config=None):
         
         if audio_file.filename == '':
             return jsonify({'error': 'No audio file selected'}), 400
-
-        import vertexai
-        from vertexai.preview import model_garden
-
-        vertexai.init(project="meeting-record-whisper-program", location="asia-southeast1")  # e.g., "us-central1"
-
+            
+        # Get format preference (text or PDF)
+        format_type = request.form.get('format', 'text')  # Default to text if not specified
+        
+        temp_audio_path = None
+        
         try:
+            import vertexai
+            from vertexai.preview import model_garden
 
+            # Initialize Vertex AI
+            vertexai.init(project="meeting-record-whisper-program", location="asia-southeast1")
+
+            # Save the uploaded file temporarily
             with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_audio:
                 audio_file.save(temp_audio.name)
                 temp_audio_path = temp_audio.name
+                
             # Load Whisper model from Model Garden
             whisper_model = model_garden.OpenModel("openai/whisper-large@whisper-large-v3")
 
-            # Deploy the model (or skip if already deployed)
-            endpoint = whisper_model.deploy()  # You can cache this in real app
+            # Deploy the model
+            endpoint = whisper_model.deploy()
 
             # Read audio file
             with open(temp_audio_path, "rb") as f:
@@ -95,26 +155,40 @@ def create_app(test_config=None):
                 audio=audio_content,
                 mime_type="audio/wav"  # or "audio/mpeg", "audio/flac", etc.
             )
-
-            # Clean up
-            os.unlink(temp_audio_path)
-
+            
+            transcription_text = response.text
+            
+            # Clean up the temporary audio file
+            if temp_audio_path and os.path.exists(temp_audio_path):
+                os.unlink(temp_audio_path)
+                temp_audio_path = None
+            
+            # If PDF format is requested, generate PDF
+            if format_type.lower() == 'pdf':
+                pdf_path = generate_pdf(transcription_text)
+                
+                # Return the PDF file
+                return send_file(
+                    pdf_path,
+                    as_attachment=True,
+                    download_name=os.path.basename(pdf_path),
+                    mimetype='application/pdf'
+                )
+            
+            # Otherwise return JSON with transcription text
             return jsonify({
                 "success": True,
-                "transcription": response.text
+                "transcription": transcription_text
             })
 
         except Exception as e:
-            os.unlink(temp_audio_path)
+            # Clean up the temporary file in case of error
+            if temp_audio_path and os.path.exists(temp_audio_path):
+                os.unlink(temp_audio_path)
+                
             return jsonify({
                 "success": False,
                 "error": str(e)
             }), 500
-                
-        except Exception as e:
-            return jsonify({
-                'success': False,
-                'error': str(e)
-            }), 500
-
+        
     return app
