@@ -1,25 +1,47 @@
 python -m venv myvenv
+
 myvenv\Scripts\activate.bat
+
 cd Meeting-Flask-Program
+
 mkdir app
+
 cd app
+
 cd . > __init__.py
+
 cd . > main.py
+
 mkdir templates
+
 mkdir static
+
 mkdir static/css
+
 mkdir static/js
+
 mkdir static/img
+
 cd . > static/css/style.css
+
 cd . > static/js/script.js
+
 cd . > static/img/logo.png
+
 cd . > static/img/favicon.ico
+
 cd . > templates/index.html
+
 cd . > templates/about.html
+
 cd . > templates/contact.html
+
 cd . > templates/services.html
+
 cd . > templates/login.html
+
 cd . > templates/register.html
+
 cd . > requirements.txt
 
 pip install Flask
